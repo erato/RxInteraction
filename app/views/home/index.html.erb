@@ -1,0 +1,477 @@
+    <script type="text/javascript">
+            var radius = 15;
+            var selected_drugs = [];
+            var current_interactions = [];
+            var colors = ['#366092', '#953734', '#76923c', '#5f497a', '#31859b', '#974806', '#262626', '#494429', '#17365d'];
+
+            function draw_grid(context) {
+              context.beginPath();
+
+              var height = 500;
+              var width = 620;
+              var x_start = 70;
+              var y_start = 20;
+
+              column_labels = ['Highly Unlikely', 'Unlikely', 'Likely', 'Highly Likely'];
+              row_labels = ['Death', 'Very Severe', 'Severe', 'Moderate', 'Uncomfortable', 'Nuisance'];
+
+              var column_count = column_labels.length;
+              var row_count = row_labels.length;
+              var v_line_every_px = width / column_count;
+              var h_line_every_px = height / row_count;
+
+              context.fillStyle = "#000000";
+
+              for (var i = 0; i < column_count; i++) {
+                var x = i * v_line_every_px;
+
+                if (i != 0) {
+                  context.moveTo(x_start + x, y_start);
+                  context.lineTo(x_start + x, height + y_start);
+                }
+
+                context.textAlign = "center";
+                context.font = "12px serif";
+                context.fillText(column_labels[i], x_start + x + (v_line_every_px/2), height + y_start);
+              }
+
+              for (var i = 0; i < row_count; i++) {
+                var y = i * h_line_every_px;
+
+                if (i != 0) {
+                  context.moveTo(x_start, y_start + y);
+                  context.lineTo(width + x_start, y_start + y);
+                }
+
+                context.textAlign = "left";
+                context.font = "12px serif";
+                context.textBaseline = "middle";
+                context.fillText(row_labels[i], 5, y_start + y + (h_line_every_px/2));
+              }
+
+              context.lineWidth = 1;
+              context.strokeStyle = "#777777";
+              context.stroke();
+              context.fill();
+            }
+
+            function add_point(context, interaction, drug_a, drug_b) {
+              context.beginPath();
+              context.arc(interaction.position.x, interaction.position.y, interaction.radius,
+                Math.PI * 0.5, Math.PI * 1.5, false);
+
+              context.fillStyle = drug_a.color;
+              context.fill();
+              context.stroke();
+              context.lineWidth = 1;
+              context.strokeStyle = "#000000";
+              context.stroke();
+              context.closePath();
+
+              context.beginPath();
+              context.arc(interaction.position.x, interaction.position.y, interaction.radius,
+                Math.PI * 0.5, Math.PI * 1.5, true);
+              context.fillStyle = drug_b.color;
+              context.fill();
+              context.stroke();
+              context.lineWidth = 1;
+              context.strokeStyle = "#000000";
+              context.closePath();
+            }
+
+            function render_selected() {
+              $('#pnlSelectedDrugs').html('');
+
+              for (var i = 0; i < selected_drugs.length; i++) {
+                var selected_drug = selected_drugs[i];
+
+                var name = $('<span>' + selected_drug.name + '</span>')
+                  .css('background-color', selected_drug.color)
+                  .click(function () {
+                      var drug_id = $(this).parents('div').data().id;
+                      $.get('drugs/' + drug_id, null, function(drug) {
+
+                        $('#lblDescription').html(drug.description);
+                        $('#lblIndication').html(drug.indication);
+                        $('#lblPharmacology').html(drug.pharmacology);
+
+                        $('#pnlDrugInfo').dialog('option', 'title', drug.name).dialog('open');
+                      });
+                  });
+
+                  var remove_drug_html = $('<a>x</a>').click(function() {
+                    var remove_drug_id = $(this).parents('div').data().id;
+                    selected_drugs = _.select(selected_drugs, function (d) {
+                      return d.id != remove_drug_id; });
+
+                    current_interactions = _.select(current_interactions, function(it) {
+                      var result = !(it.drugbank_id == remove_drug_id || it.interaction_drugbank_id == remove_drug_id);
+                      return result
+                    });
+
+                    render_selected();
+                    render_current_interactions(); });
+
+                var html = $('<div></div>').data(selected_drug).append(name).append(remove_drug_html);
+
+                $('#pnlSelectedDrugs').append(html);
+              }
+            }
+
+            function getColor (index) {
+              if (index > colors.length - 1) {
+                index = colors.length % index;
+              }
+
+              return colors[index]
+            }
+
+            function render_current_interactions() {
+              var canvas = document.getElementById("cnvGraph");
+              var context = canvas.getContext("2d");
+
+              current_interactions.sort(function(a,b) { return b.severity - a.severity;});
+
+              context.clearRect(0, 0, canvas.width, canvas.height);
+              draw_grid(context);
+
+              $('#pnlCurrentInteractions table tbody').html('');
+              for (var i = 0; i < current_interactions.length; i++) {
+                var current_interaction = current_interactions[i];
+                var severity = Math.round(current_interaction.severity * 10000) / 100;
+                var likelihood = Math.round(current_interaction.likelihood * 10000) / 100;
+
+                var drugs = _.select(selected_drugs, function (selected_drug) {
+                    return selected_drug.id == current_interaction.drugbank_id ||
+                        selected_drug.id == current_interaction.interaction_drugbank_id; });
+
+                var drug_a_html = $('<span>' + drugs[0].name + '</span>').css('background-color', drugs[0].color)
+                var drug_b_html = $('<span>' + drugs[1].name + '</span>').css('background-color', drugs[1].color)
+                var name_html = $('<td class="name"></td>').append(drug_a_html).append(' + ').append(drug_b_html);
+
+                var more_button_html = $('<input style="font-size:9pt;" type="button" value="More Info" />')
+                    .click(function (e) {
+                    var data_struct = $(this).parents('tr').data();
+                    $('#pnlInteraction').dialog('open').find('.info').text(data_struct.interaction.description);});
+
+                var html = $('<tr id="interaction-' + current_interaction.id + '"></tr>')
+                    .append('<td style="text-align:center;">' + severity + '%</td>')
+                    .append('<td style="text-align:center;">' + likelihood + '%</td>')
+                    .append(name_html)
+                    .append($('<td style="text-align:center;"></td>').append(more_button_html))
+                    .data({ interaction: current_interaction, drugs: drugs });
+
+                $('#pnlCurrentInteractions table tbody').append(html);
+
+                add_point(context, current_interaction, drugs[0], drugs[1]);
+              }
+
+              $('.lblInteractionCount').text(current_interactions.length);
+            }
+
+            function search_result_click(e) {
+              var id = $(this).data().drugbank_id;
+              var name = $(this).data().name;
+              var drug = { id: id, name: name, color: getColor(selected_drugs.length) };
+
+              $('#pnlSearch').css('display', 'none').html('');
+              $("#txtSearch").val('');
+
+              var duplicate_drug = _.detect(selected_drugs, function(d) {
+                return drug.id == d.id;});
+
+              if (duplicate_drug == null) {
+                selected_drugs.push(drug);
+              }
+
+              var selected_drug_ids = _.map(selected_drugs, function (selected_drug) {
+                return selected_drug.id; }).join(',');
+
+              $.get('<%= drug_interactions_path  %>', { drugs:selected_drug_ids  },
+                function(drug_interactions) {
+                  for (var i = 0; i < drug_interactions.length; i++) {
+                    var drug_interaction = drug_interactions[i];
+                    var duplicate = _.detect(current_interactions, function(i) {
+                      return drug_interaction.id == i.id;});
+
+                    if (duplicate == null) {
+                      var grid_height = 500;
+                      var grid_width = 620;
+                      var grid_x_offset = 70;
+                      var grid_y_offset = 20;
+                      var canvas_x = (drug_interaction.likelihood * grid_width) + grid_x_offset;
+                      var canvas_y = ((1 - drug_interaction.severity) * grid_height) + grid_y_offset;
+
+                      drug_interaction.radius = 15;
+                      drug_interaction.position = { x: canvas_x, y: canvas_y };
+                      drug_interaction.top_left = { x:canvas_x - radius, y:canvas_y - radius };
+                      drug_interaction.bottom_right = { x:canvas_x + radius, y:canvas_y + radius };
+
+                      current_interactions.push(drug_interaction);
+                    }
+                  }
+
+                  render_selected();
+                  render_current_interactions();
+              });
+            }
+
+            $(function () {
+                var canvas_width = $('#cnvGraph').attr('width');
+                var canvas_height = $('#cnvGraph').attr('height');
+
+                $('#cnvGraph').click(function(e) {
+                    var x;
+                    var y;
+
+                    if (e.pageX != undefined && e.pageY != undefined) {
+                      x = e.pageX;
+                      y = e.pageY;
+                    }
+                    else {
+                      x = e.clientX + document.body.scrollLeft + document.documentElement.scrollLeft;
+                      y = e.clientY + document.body.scrollTop + document.documentElement.scrollTop;
+                    }
+
+                    var offset = $(this).offset();
+
+                    x -= offset.left;
+                    y -= offset.top;
+
+                    for (var i = 0; i < current_interactions.length; i++) {
+                        var current_interaction = current_interactions[i];
+                        var hit = y >= current_interaction.top_left.y
+                                  && y <= current_interaction.bottom_right.y
+                                  && x >= current_interaction.top_left.x
+                                  && x <= current_interaction.bottom_right.x;
+
+                        if (hit) {
+                            var data_struct = $('#interaction-' + current_interaction.id).data();
+
+                            $('#pnlInteraction').dialog('open').find('.info').html(data_struct.interaction.description);
+                        }
+                    }
+                });
+
+                render_current_interactions(current_interactions);
+
+                var search_timer = 0;
+                $("#txtSearch").keyup(function (e) {
+                    window.clearTimeout(search_timer)
+                    search_timer = window.setTimeout(function () {
+                        var value = $("#txtSearch").val();
+                        $('#pnlSearch').css('display', 'block').html('');
+                        $.get('<%= drug_search_path %>', { term: value }, function (matches) {
+                            for (var i = 0; i < matches.length; i++) {
+                                var match = matches[i];
+                                var bullet = $('<li>' + match.name + '</li>')
+                                    .data(match)
+                                    .click(search_result_click);
+                                $('#pnlSearch').append(bullet);
+                            }
+                        }, 'json');
+                    }, 500);
+                });
+
+                $('#pnlInteraction').dialog({
+                   height:300,
+                   width:400,
+                   autoOpen: false,
+                   draggable:false,
+                   resizable:false,
+                   modal:true
+                });
+
+
+                $('#pnlDrugInfo').dialog({
+                   height:500,
+                   width:600,
+                   autoOpen: false,
+                   draggable:false,
+                   resizable:false,
+                   modal:true
+                });
+
+                $('.btnCloseModal').click(function (e) {
+                    $(this).parents('.modal').dialog('close');
+                })
+            });
+
+
+    </script>
+    <style type="text/css">
+        body
+        {
+            padding-top: 20px;
+            width:768px;
+            margin:auto;
+        }
+        #txtSearch
+        {
+            padding: 10px;
+            font-size: 16pt;
+            border-radius: 10px;
+            border: 1px solid #444;
+            width: 350px;
+        }
+
+        #pnlSelectedDrugs div
+        {
+            float: left;
+            height: 27px;
+            margin: 0px 5px 10px 5px;
+        }
+
+        #pnlSelectedDrugs div span
+        {
+            float: left;
+            padding: 0 10px;
+            color: #FFFFFF;
+            border-radius: 15px 0px 0px 15px;
+            border:1px solid #d6d6d6;
+            display: block;
+            height: 27px;
+            border-right-width: 0px;
+        }
+
+        #pnlSelectedDrugs div a
+        {
+            float: left;
+            font-family: sans-serif;
+            border-radius: 0px 15px 15px 0px;
+            height:27px;
+            background-color:#555;
+            text-align:center;
+            border:1px solid #d6d6d6;
+            border-left-width: 0px;
+            color: #f5f5f5;
+            padding:0px 11px 0px 7px
+        }
+
+        #pnlSearch
+        {
+            font-size:10pt;
+            width:460px;
+            border:1px solid #fff;
+            position: absolute;
+            background-color:#fff;
+            max-height:500px;
+            overflow-y:auto;
+            border-radius: 10px;
+            display:none;
+        }
+
+        #pnlSearch li
+        {
+            border:1px solid #d6d6d6;
+            width:200px;
+            overflow:hidden;
+            white-space:nowrap;
+            display: block;
+            float: left;
+            margin:2px 5px 2px 5px;
+            background-color: #ececec;
+            border-radius: 8px;
+            padding:0px 3px 0px 3px;
+        }
+
+        .headliner
+        {
+            background-color: #103b84;
+            color:#fff;
+            font-weight:bold;
+            padding:0px 0px 0px 10px;
+        }
+
+        #pnlCurrentInteractions table
+        {
+            width:100%;
+        }
+
+        #pnlCurrentInteractions table thead
+        {
+            font-size:10pt;
+        }
+
+        #pnlCurrentInteractions table .name span
+        {
+            padding:0px 4px 0px 4px;
+            color:#ffffff;
+        }
+
+        #pnlCurrentInteractions table tbody tr
+        {
+
+        }
+
+        #pnlCurrentInteractions table tbody td
+        {
+            background: url(<%=asset_path "ixn_list_bg.png"%>) repeat-x top left;
+            height:27px;
+
+        }
+
+        .btnCloseModal
+        {
+            display:block;
+            float:right;
+        }
+
+        .modal p
+        {
+            font-size:10pt;
+        }
+
+        .modal p label
+        {
+          font-weight:bold;
+          padding-right:10px;
+        }
+    </style>
+
+
+<div class="container_16">
+    <div class="grid_6"><%= image_tag "logo.png" %></div>
+    <div class="grid_10" style="padding-top:20px;">
+        <input type="search" id="txtSearch" autocomplete="off" autocorrect="off" autocapitalize="off" />
+        <div style="font-size:9pt">examples: cyclosporine, methohexital, ritonavir, ibuprofen, nifedipine</div>
+        <ul id="pnlSearch" class=""></ul>
+    </div>
+    <div class="grid_16" id="pnlSelectedDrugs"></div>
+    <div class="grid_16 headliner">Interaction Graph (<span class="lblInteractionCount">0</span>)</div>
+    <div class="grid_16">
+        <canvas id="cnvGraph" height="540" width="710" style="display: block;margin: 0px auto;"></canvas>
+    </div>
+    <div class="grid_16 headliner">Interaction List (<span class="lblInteractionCount">0</span>)</div>
+    <div class="grid_16" id="pnlCurrentInteractions">
+        <table>
+            <thead>
+                <tr>
+                    <td style="width:10%;text-align:center;">Severity</td>
+                    <td style="width:15%;text-align:center;">Likelihood</td>
+                    <td style="width:65%;">Drugs</td>
+                    <td style="width:10%;text-align:center;"></td>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+</div>
+
+<div id="pnlInteraction" title="Interaction Description" class="modal">
+    <p class="info"></p>
+    <input type="button" value="Close" class="btnCloseModal" />
+</div>
+
+<div id="pnlDrugInfo" title="Drug Description" class="modal">
+    <p>
+      <label for="lblDescription">Description:</label><span id="lblDescription"></span>
+    </p>
+    <p>
+      <label for="lblIndication">Indication:</label><span id="lblIndication"></span>
+    </p>
+    <p>
+      <label for="lblPharmacology">Pharmacology:</label><span id="lblPharmacology"></span>
+    </p>
+    <input type="button" value="Close" class="btnCloseModal" />
+</div>
